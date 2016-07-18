@@ -1,0 +1,231 @@
+---
+title: "energy_consumption_analysis"
+author: "Julia Gustavsen"
+date: "July 18, 2016"
+output: 
+    html_document:
+      keep_md: true
+      number_sections: yes
+      theme: cerulean
+      toc: yes
+      toc_depth: 6 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This project uses the household power consumption data from an individual household over several years. The idea is that based on the time of year and day of the week we can predict the energy consumption. This will give us better ideas about the times of greatest energy use we can design complementary renewable energy systems that can target times when energy use is highest and energy can be the most expensive. Thus the reduction would help save energy overall and would save money for the consumer/business. 
+
+# Load libraries and read in data
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(reshape2)
+library(broom)
+```
+
+
+
+```{r}
+energy_con <- read.csv2("./data/household_power_consumption.txt",
+                        na.strings = "?",
+                        stringsAsFactors = FALSE)
+```
+
+# Understanding the data
+
+```{r, echo=FALSE}
+## Notes on the data
+# "Active" power is power that does actual work - e.g: creating heat, lifting loads, etc.
+# 
+# "Reactive power" is power where the current is out of phase with the voltage, and the "Volts x amps" doesn't do any real work.  Current that charges a capacitor, for example or current that creates the magnetic field around a coil for another.  
+# 
+# "Apparent power" is the mathematical combination of these two.
+# 
+# 1.date: Date in format dd/mm/yyyy 
+# 2.time: time in format hh:mm:ss 
+# 3.global_active_power: household global minute-averaged active power (in kilowatt) 
+# 4.global_reactive_power: household global minute-averaged reactive power (in kilowatt) 
+# 5.voltage: minute-averaged voltage (in volt) 
+# 6.global_intensity: household global minute-averaged current intensity (in ampere) 
+# 7.sub_metering_1: energy sub-metering No. 1 (in watt-hour of active energy). It corresponds to the kitchen, containing mainly a dishwasher, an oven and a microwave (hot plates are not electric but gas powered). 
+# 8.sub_metering_2: energy sub-metering No. 2 (in watt-hour of active energy). It corresponds to the laundry room, containing a washing-machine, a tumble-drier, a refrigerator and a light. 
+# 9.sub_metering_3: energy sub-metering No. 3 (in watt-hour of active energy). It corresponds to an electric water-heater and an air-conditioner.
+```
+
+## Tidy and format data:
+
+```{r}
+str(energy_con)
+energy_con$Date <- as.Date(energy_con$Date, format = "%d/%m/%Y")
+
+energy_con$Time <- hms(energy_con$Time)
+energy_con$Global_active_power <- as.numeric(energy_con$Global_active_power)
+energy_con$Global_reactive_power <- as.numeric(energy_con$Global_reactive_power)
+energy_con$Voltage <- as.numeric(energy_con$Voltage)
+energy_con$Global_intensity <- as.numeric(energy_con$Global_intensity)
+energy_con$Sub_metering_1 <- as.numeric(energy_con$Sub_metering_1)
+energy_con$Sub_metering_2 <- as.numeric(energy_con$Sub_metering_2)
+energy_con$Sub_metering_3 <- as.numeric(energy_con$Sub_metering_3)
+
+```
+
+
+# Exploratory data analysis
+
+## Examine global active power by day of the year
+```{r, cache=TRUE}
+energy_con$YDay <- yday(energy_con$Date)
+ggplot(energy_con,
+       aes(x = YDay,
+           y = Global_active_power))+
+  geom_point(alpha = 0.3)
+```
+
+Could also look at weekday
+```{r, cache=TRUE}
+## Sunday is 1, Saturday is 7
+energy_con$WDay <- wday(energy_con$Date)
+ggplot(energy_con,
+       aes(x = WDay,
+           y = Global_active_power))+
+  geom_jitter(alpha = 0.3)
+
+```
+
+Overall global intensity by time of day
+```{r, cache=TRUE}
+ggplot(energy_con,
+       aes(x = Time@hour, 
+           y = Global_intensity))+
+  geom_point(alpha=0.5)
+```
+
+Examine this instead using a violin plot
+```{r, cache=TRUE}
+ggplot(energy_con,
+       aes(x = as.factor(Time@hour), 
+           y = Global_intensity))+
+  geom_violin()
+```
+
+Examine the Global intensity by day of the week
+```{r, cache=TRUE}
+ggplot(energy_con,
+       aes(x = as.factor(WDay), 
+           y = Global_intensity))+
+  geom_violin()
+```
+
+
+Look at averages
+
+```{r, cache=TRUE}
+energy_con$quarter <-quarter(energy_con$Date)
+energy_con$hour <- energy_con$Time@hour
+grouped_hour_quarter <- group_by(energy_con,
+                                quarter,
+                                hour)
+```
+
+```{r, cache=TRUE}
+## global intersity
+global_intensity_hour_quarter <- dplyr::summarise(grouped_hour_quarter , mean=mean(Global_intensity, na.rm=TRUE), sd=sd(Global_intensity, na.rm=TRUE))
+names(global_intensity_hour_quarter) <- c("quarter","hour", "mean", "sd")
+```
+
+```{r, cache=TRUE}
+ggplot(global_intensity_hour_quarter,
+       aes(x = hour,
+           y = mean))+
+  geom_linerange(aes(ymin = mean-sd, ymax = mean+sd))+
+  facet_wrap(~quarter)
+```
+
+
+Examine for patterns by time of year. 
+
+
+```{r, cache=TRUE}
+sub_metering_all <- select(energy_con, Date, Time, Sub_metering_1,
+                           Sub_metering_2,
+                           Sub_metering_3,
+                           quarter, hour,WDay)
+melt_sub_metering_all <- melt(sub_metering_all, id=c("Date","Time", "quarter", "hour", "WDay"))
+head(melt_sub_metering_all)
+```
+
+```{r, cache=TRUE}
+ggplot(melt_sub_metering_all,
+       aes(x=hour,
+           y=value,
+           colour=variable))+
+  geom_point(alpha=0.5)+
+  geom_smooth()+
+  facet_wrap(~quarter)
+```
+
+
+```{r, cache=TRUE}
+ggplot(melt_sub_metering_all,
+       aes(x=hour,
+           y=value))+
+  geom_point(alpha=0.5)+
+  geom_smooth()+
+  facet_grid(variable~quarter)
+```
+
+
+```{r, cache=TRUE}
+ggplot(melt_sub_metering_all,
+       aes(x=WDay,
+           y=value))+
+  geom_point(alpha=0.2)+
+  geom_smooth()+
+  facet_grid(variable~quarter)
+```
+
+
+```{r, cache=TRUE}
+ggplot(melt_sub_metering_all,
+       aes(x=as.factor(hour),
+           y=value,
+           colour=variable))+
+  geom_boxplot()+
+  facet_wrap(~quarter)
+```
+
+
+```{r, cache=TRUE}
+ggplot(melt_sub_metering_all,
+       aes(x=as.factor(hour),
+           y=value,
+           colour=variable))+
+  geom_violin()+
+  facet_wrap(~quarter)
+```
+
+
+```{r}
+yday_vs_globint <- lm(YDay ~ Global_intensity, data = energy_con)
+summary(yday_vs_globint)
+```
+
+```{r}
+
+tidy(yday_vs_globint)
+glance(yday_vs_globint)
+obs_stats <- augment(yday_vs_globint)
+head(obs_stats)
+ggplot(obs_stats, aes(.resid)) + geom_density()
+ggplot(obs_stats, aes(x = Global_intensity, y = .resid)) + geom_point() + geom_hline(yintercept=0)
+```
+
+```{r}
+yday_vs_globint_glm <- glm(YDay ~ Global_intensity, data = energy_con)
+tidy(yday_vs_globint_glm)
+```
+
+
